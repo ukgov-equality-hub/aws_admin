@@ -1,0 +1,24 @@
+name: 'Assign tags to AWS Elastic IP addresses'
+
+on:
+  workflow_dispatch:
+   schedule:
+     - cron: "0 3 * * *"
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.TERRAFORM_AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.TERRAFORM_AWS_SECRET_ACCESS_KEY }}
+  AWS_DEFAULT_REGION: eu-west-2
+
+jobs:
+  assign_tags_to_elastic_ip_addresses:
+    name: 'Assign tags to AWS Elastic IP addresses'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Checkout Code'
+        uses: actions/checkout@v4
+
+      - name: 'Run bash script'
+        run: |
+          bash ./assign_tags_to_elastic_ip_addresses.sh
+        working-directory: ./scripts
