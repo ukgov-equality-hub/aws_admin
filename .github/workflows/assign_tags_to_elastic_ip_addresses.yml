@@ -2,8 +2,8 @@ name: 'Assign tags to AWS Elastic IP addresses'
 
 on:
   workflow_dispatch:
-   schedule:
-     - cron: "0 3 * * *"
+  schedule:
+    - cron: "0 3 * * *"
 
 env:
   AWS_ACCESS_KEY_ID: ${{ secrets.TERRAFORM_AWS_ACCESS_KEY_ID }}
