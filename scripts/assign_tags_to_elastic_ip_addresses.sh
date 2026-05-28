@@ -22,7 +22,7 @@ check_jq() {
 
 # Function to create tags on Elastic IP
 create_eip_tags() {
-    local allocation_id="$1"
+    local resource_id="$1"
     local service_value="$2"
     local environment_value="$3"
     
@@ -50,10 +50,10 @@ create_eip_tags() {
     # Create the tags
     aws ec2 create-tags \
         --region "$REGION" \
-        --resources "$allocation_id" \
+        --resources "$resource_id" \
         --tags "${tags_to_create[@]}"
     
-    echo "  Tags successfully created on EIP $allocation_id"
+    echo "  Tags successfully created on resource: ($resource_id)"
 }
 
 
@@ -63,6 +63,61 @@ main() {
 	echo "Checking if jq command is present"
 	check_jq
 	
+	echo ""
+    echo "Fetching all Network Interfaces in region: ($REGION)"
+	all_network_interfaces_data=$(aws ec2 describe-network-interfaces --region "$REGION" --output json)
+
+	network_interface_ids==$(echo "$all_network_interfaces_data" | jq -r '.NetworkInterfaces[].NetworkInterfaceId')
+	
+	while read -r network_interface_id; do
+
+		echo ""
+		
+		# Remove carriage return (\r) from network_interface_id
+		network_interface_id="${network_interface_id/$'\r'/}"		
+		echo "Network Interface ID: ($network_interface_id)";
+		
+		# Get the Network Interface data for this Network Interface ID
+		network_interface_data=$(echo "$all_network_interfaces_data" | jq -r ".NetworkInterfaces[] | select(.NetworkInterfaceId == \"$network_interface_id\")")
+		# echo "network_interface_data: $network_interface_data"
+		
+		# Check if this Network Interface already has a tag called "Service"
+		service_tag=$(echo "$network_interface_data" | jq -r '.TagSet[]? | select(.Key == "Service") | .Value')
+		# echo "  service_tag: $service_tag"
+		
+		if [[ "$service_tag" != "null" && "$service_tag" != "" ]]; then
+			echo "  Skipping - Network Interface already has 'Service' tag"
+			continue
+		fi
+		echo "  No service tag"
+		
+		# Get VPC ID from network interface
+		vpc_id=$(echo "$network_interface_data" | jq -r '.VpcId')
+        
+        if [[ -z "$vpc_id" || "$vpc_id" == "null" ]]; then
+            echo "  Skipping - Could not determine VPC for network interface"
+            continue
+        fi        
+        echo "  Network Interface is in VPC: ($vpc_id)"
+		
+        # Get VPC details and tags
+		vpc_data=$(aws ec2 describe-vpcs --region "$REGION" --vpc-ids "$vpc_id" --output json)
+		# echo "  vpc_data: $vpc_data"
+		
+		# Extract Service and Environment tags from VPC
+		service_tag=$(echo "$vpc_data" | jq -r '.Vpcs[0].Tags[]? | select(.Key == "Service") | .Value')
+		environment_tag=$(echo "$vpc_data" | jq -r '.Vpcs[0].Tags[]? | select(.Key == "Environment") | .Value')
+        echo "  VPC Service tag: (${service_tag:-'(not found)'})"
+        echo "  VPC Environment tag: (${environment_tag:-'(not found)'})"
+		
+		echo "  Creating tags on Network Interface"
+		create_eip_tags "$network_interface_id" "$service_tag" "$environment_tag"
+		
+	done <<< "$network_interface_ids"
+
+	echo ""	
+	echo "Network Interface tagging process completed!"
+
 	echo ""
     echo "Fetching all Elastic IP addresses in region: ($REGION)"
 	all_elastic_ips_data=$(aws ec2 describe-addresses --region "$REGION" --output json)
@@ -84,7 +139,7 @@ main() {
 		# echo "elastic_ip_data: $elastic_ip_data"
 		
 		# Check if this Elastic IP already has a tag called "Service"
-		service_tag=$(echo "$elastic_ip_data" | jq -r '.Tags[]? | select(.Key == "Service") | .Value')		
+		service_tag=$(echo "$elastic_ip_data" | jq -r '.Tags[]? | select(.Key == "Service") | .Value')
 		# echo "  service_tag: $service_tag"
 		
 		if [[ "$service_tag" != "null" && "$service_tag" != "" ]]; then
@@ -94,7 +149,7 @@ main() {
 		echo "  No service tag"
 		
 		# Get the Network Interface ID for this Elastic IP
-		network_interface_id=$(echo "$elastic_ip_data" | jq -r '.NetworkInterfaceId // empty')		
+		network_interface_id=$(echo "$elastic_ip_data" | jq -r '.NetworkInterfaceId // empty')
 		# echo "  network_interface_id: $network_interface_id"
 		
 		if [[ -z "$network_interface_id" || "$network_interface_id" == "null" ]]; then
@@ -107,24 +162,11 @@ main() {
 		network_interface_data=$(aws ec2 describe-network-interfaces --region "$REGION" --network-interface-ids "$network_interface_id" --output json)
 		# echo "  network_interface_data: $network_interface_data"
 		
-		# Get VPC ID from network interface
-        vpc_id=$(echo "$network_interface_data" | jq -r '.NetworkInterfaces[0].VpcId')
-        
-        if [[ -z "$vpc_id" || "$vpc_id" == "null" ]]; then
-            echo "  Skipping - Could not determine VPC for network interface"
-            continue
-        fi        
-        echo "  Network Interface is in VPC: ($vpc_id)"
-		
-        # Get VPC details and tags
-		vpc_data=$(aws ec2 describe-vpcs --region "$REGION" --vpc-ids "$vpc_id" --output json)
-		# echo "  vpc_data: $vpc_data"
-		
-		# Extract Service and Environment tags from VPC
-		service_tag=$(echo "$vpc_data" | jq -r '.Vpcs[0].Tags[]? | select(.Key == "Service") | .Value')
-		environment_tag=$(echo "$vpc_data" | jq -r '.Vpcs[0].Tags[]? | select(.Key == "Environment") | .Value')
-        echo "  VPC Service tag: (${service_tag:-'(not found)'})"
-        echo "  VPC Environment tag: (${environment_tag:-'(not found)'})"
+		# Extract Service and Environment tags from Network Interface
+		service_tag=$(echo "$network_interface_data" | jq -r '.NetworkInterfaces[0].TagSet[]? | select(.Key == "Service") | .Value')
+		environment_tag=$(echo "$network_interface_data" | jq -r '.NetworkInterfaces[0].TagSet[]? | select(.Key == "Environment") | .Value')
+        echo "  Network Interface Service tag: (${service_tag:-'(not found)'})"
+        echo "  Network Interface Environment tag: (${environment_tag:-'(not found)'})"
 		
 		echo "  Creating tags on Elastic IP"
 		create_eip_tags "$allocation_id" "$service_tag" "$environment_tag"
