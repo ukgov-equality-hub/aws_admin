@@ -1,0 +1,38 @@
+name: 'Terraform'
+
+on:
+  workflow_dispatch:
+
+concurrency: ${{ github.workflow }}  # Prevents more than one instance of this workflow running at the same time
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.TERRAFORM_AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.TERRAFORM_AWS_SECRET_ACCESS_KEY }}
+  AWS_DEFAULT_REGION: eu-west-2
+  TERRAFORM_STATE_BUCKET: uk-gov-equality-hub-terraform-state-bucket
+  TERRAFORM_STATE_FILE: aws-admin.tfstate
+
+jobs:
+  terraform:
+    name: 'Terraform'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 'Checkout Code'
+        uses: actions/checkout@v7
+
+      - name: 'Install Terraform'
+        uses: hashicorp/setup-terraform@v4
+
+      - name: 'Init Terraform'
+        run: |
+          terraform init "-backend-config=bucket=${{ env.TERRAFORM_STATE_BUCKET }}" "-backend-config=key=${{ env.TERRAFORM_STATE_FILE }}" "-backend-config=region=${{ env.AWS_DEFAULT_REGION }}" "-backend-config=access_key=${{ secrets.TERRAFORM_AWS_ACCESS_KEY_ID }}" "-backend-config=secret_key=${{ secrets.TERRAFORM_AWS_SECRET_ACCESS_KEY }}"
+        working-directory: ./terraform
+
+      - name: 'Apply Terraform changes'
+        run: |
+          terraform apply \
+          -var "github_url=https://github.com/${{ github.repository }}" \
+          -var "NOTIFICATION_EMAIL=${{ secrets.NOTIFICATION_EMAIL }}" \
+          -auto-approve
+        working-directory: ./terraform
